@@ -11,7 +11,7 @@ const bot = new Bot(token);
 // Function to download YouTube audio (without ffmpeg)
 const downloadAudio = async (url) => {
   const audioStream = ytdl(url, { filter: 'audioonly' }); // Stream audio only
-  const tmpFile = path.join('/tmp', 'temp.webm'); // Use '/tmp' for serverless environments
+  const tmpFile = path.join('/tmp', 'temp.webm'); // Save to '/tmp' for serverless environments
 
   // Save the stream to a file
   const writeStream = fs.createWriteStream(tmpFile);
@@ -37,7 +37,7 @@ bot.on('message:text', async (ctx) => {
       // Download the YouTube audio as a .webm file
       const tmpFile = await downloadAudio(url);
 
-      // Send the downloaded audio file
+      // Send the downloaded audio file back to the user
       await ctx.replyWithAudio({ media: fs.createReadStream(tmpFile) });
 
       // Optionally clean up the temporary file after sending
