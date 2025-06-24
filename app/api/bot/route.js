@@ -16,17 +16,22 @@ if (!token) throw new Error('TELEGRAM_BOT_TOKEN environment variable not found.'
 const bot = new Bot(token)
 
 // Function to convert YouTube URL to MP3
-const convertToMP3 = async (url) => {
-  const stream = ytdl(url, { filter: 'audioonly' })
-  const output = new (require('stream')).Readable()
-  ffmpeg(stream)
-    .audioCodec('libmp3lame')
-    .format('mp3')
-    .on('error', (err) => {
-      throw new Error('Error during conversion: ' + err.message)
-    })
-    .pipe(output, { end: true })
-  return output
+const convertToMP3 = (url) => {
+  return new Promise((resolve, reject) => {
+    const stream = ytdl(url, { filter: 'audioonly' })
+    const tmpFile = path.join(__dirname, 'temp.mp3')
+
+    ffmpeg(stream)
+      .audioCodec('libmp3lame')
+      .format('mp3')
+      .on('end', () => {
+        resolve(tmpFile) // Resolving the path to the converted file
+      })
+      .on('error', (err) => {
+        reject(new Error('Error during conversion: ' + err.message))
+      })
+      .save(tmpFile) // Save the output to a file
+  })
 }
 
 bot.on('message:text', async (ctx) => {
@@ -39,15 +44,12 @@ bot.on('message:text', async (ctx) => {
 
     try {
       await ctx.reply('Processing your request, this might take a while...')
-      const mp3Stream = await convertToMP3(url)
-
-      // You can save the MP3 to a temporary file or send the stream directly
-      const tmpFile = path.join(__dirname, 'temp.mp3')
-      const writableStream = fs.createWriteStream(tmpFile)
-      await pipeline(mp3Stream, writableStream)
+      
+      // Convert the YouTube video to MP3
+      const tmpFile = await convertToMP3(url)
 
       // Send the MP3 file as a response
-      await ctx.replyWithAudio({ media: tmpFile })
+      await ctx.replyWithAudio({ media: fs.createReadStream(tmpFile) })
       
       // Optionally clean up the temporary file after sending
       fs.unlinkSync(tmpFile)
