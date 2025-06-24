@@ -1,68 +1,53 @@
-export const dynamic = 'force-dynamic'
+const { Bot, webhookCallback } = require('grammy');
+const ytdl = require('ytdl-core');
+const fs = require('fs');
+const path = require('path');
 
-export const fetchCache = 'force-no-store'
+const token = process.env.TELEGRAM_BOT_TOKEN;
+if (!token) throw new Error('TELEGRAM_BOT_TOKEN environment variable not found.');
 
-import { Bot, webhookCallback } from 'grammy'
-import ytdl from 'ytdl-core'
-import ffmpeg from 'fluent-ffmpeg'
-import ffmpegStatic from 'ffmpeg-static' // Import ffmpeg-static
-import fs from 'fs'
-import path from 'path'
+const bot = new Bot(token);
 
-const token = process.env.TELEGRAM_BOT_TOKEN
+// Function to download YouTube audio (without ffmpeg)
+const downloadAudio = async (url) => {
+  const audioStream = ytdl(url, { filter: 'audioonly' }); // Stream audio only
+  const tmpFile = path.join(__dirname, 'temp.webm'); // Store audio in .webm format
 
-if (!token) throw new Error('TELEGRAM_BOT_TOKEN environment variable not found.')
+  // Save the stream to a file
+  const writeStream = fs.createWriteStream(tmpFile);
+  audioStream.pipe(writeStream);
 
-const bot = new Bot(token)
-
-// Set the ffmpeg path to the one from ffmpeg-static
-ffmpeg.setFfmpegPath(ffmpegStatic.path)
-
-// Function to convert YouTube URL to MP3
-const convertToMP3 = (url) => {
   return new Promise((resolve, reject) => {
-    const stream = ytdl(url, { filter: 'audioonly' })
-    const tmpFile = path.join(__dirname, 'temp.mp3')
-
-    ffmpeg(stream)
-      .audioCodec('libmp3lame')
-      .format('mp3')
-      .on('end', () => {
-        resolve(tmpFile) // Resolving the path to the converted file
-      })
-      .on('error', (err) => {
-        reject(new Error('Error during conversion: ' + err.message))
-      })
-      .save(tmpFile) // Save the output to a file
-  })
-}
+    writeStream.on('finish', () => resolve(tmpFile));
+    writeStream.on('error', reject);
+  });
+};
 
 bot.on('message:text', async (ctx) => {
-  const messageText = ctx.message.text
-  const youtubeUrlPattern = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+|(?:v|e(?:mbed)?)\/(\S+))|youtu\.be\/(\S+))/g
-  const youtubeUrlMatch = messageText.match(youtubeUrlPattern)
+  const messageText = ctx.message.text;
+  const youtubeUrlPattern = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+|(?:v|e(?:mbed)?)\/(\S+))|youtu\.be\/(\S+))/g;
+  const youtubeUrlMatch = messageText.match(youtubeUrlPattern);
 
   if (youtubeUrlMatch && youtubeUrlMatch[0]) {
-    const url = youtubeUrlMatch[0]
+    const url = youtubeUrlMatch[0];
 
     try {
-      await ctx.reply('Processing your request, this might take a while...')
+      await ctx.reply('Processing your request, this might take a while...');
 
-      // Convert the YouTube video to MP3
-      const tmpFile = await convertToMP3(url)
+      // Download the YouTube audio as a .webm file
+      const tmpFile = await downloadAudio(url);
 
-      // Send the MP3 file as a response
-      await ctx.replyWithAudio({ media: fs.createReadStream(tmpFile) })
+      // Send the downloaded audio file
+      await ctx.replyWithAudio({ media: fs.createReadStream(tmpFile) });
 
       // Optionally clean up the temporary file after sending
-      fs.unlinkSync(tmpFile)
-
+      fs.unlinkSync(tmpFile);
     } catch (error) {
-      await ctx.reply('There was an error processing your request: ' + error.message)
+      await ctx.reply('There was an error processing your request: ' + error.message);
     }
   } else {
-    await ctx.reply('Please send a valid YouTube URL.')
+    await ctx.reply('Please send a valid YouTube URL.');
   }
-})
+});
 
-export const POST = webhookCallback(bot, 'std/http')
+module.exports.POST = webhookCallback(bot, 'std/http');
