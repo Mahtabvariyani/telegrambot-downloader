@@ -5,15 +5,18 @@ export const fetchCache = 'force-no-store'
 import { Bot, webhookCallback } from 'grammy'
 import ytdl from 'ytdl-core'
 import ffmpeg from 'fluent-ffmpeg'
+import ffmpegStatic from 'ffmpeg-static' // Import ffmpeg-static
 import fs from 'fs'
 import path from 'path'
-import { pipeline } from 'stream/promises'
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 
 if (!token) throw new Error('TELEGRAM_BOT_TOKEN environment variable not found.')
 
 const bot = new Bot(token)
+
+// Set the ffmpeg path to the one from ffmpeg-static
+ffmpeg.setFfmpegPath(ffmpegStatic.path)
 
 // Function to convert YouTube URL to MP3
 const convertToMP3 = (url) => {
@@ -44,13 +47,13 @@ bot.on('message:text', async (ctx) => {
 
     try {
       await ctx.reply('Processing your request, this might take a while...')
-      
+
       // Convert the YouTube video to MP3
       const tmpFile = await convertToMP3(url)
 
       // Send the MP3 file as a response
       await ctx.replyWithAudio({ media: fs.createReadStream(tmpFile) })
-      
+
       // Optionally clean up the temporary file after sending
       fs.unlinkSync(tmpFile)
 
