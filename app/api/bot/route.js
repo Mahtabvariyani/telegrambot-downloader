@@ -1,13 +1,14 @@
+import { Telegraf } from 'telegraf';
+import ytdl from 'ytdl-core';
+import ffmpeg from 'fluent-ffmpeg';
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
+
 // Load environment variables from .env file
-require('dotenv').config();
+dotenv.config();
 
-const { Telegraf } = require('telegraf');  // Import Telegraf
-const ytdl = require('ytdl-core');
-const ffmpeg = require('fluent-ffmpeg');
-const fs = require('fs');
-const path = require('path');
-
-// Create your bot instance (replace YOUR_BOT_TOKEN with the environment variable)
+// Initialize the bot using the token from the environment variable
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // Function to download and convert YouTube audio to MP3
@@ -20,53 +21,39 @@ async function downloadAndConvertToMP3(url, outputFilePath) {
       .audioBitrate(192)
       .save(outputFilePath)
       .on('end', () => resolve(outputFilePath))
-      .on('error', (err) => reject(err));  // Specify the type for 'err'
+      .on('error', (err) => reject(err));
   });
 }
 
-// Command: /start - Greets the user
-bot.start((ctx) => {
-  ctx.reply('Hi! Send me a YouTube link and I will convert it to MP3 for you.');
-});
+// Handle the webhook requests from Telegram (using Next.js API route)
+export async function POST(req, res) {
+  try {
+    const update = req.body;
 
-// Command: Handle text messages (assuming the text is a YouTube URL)
-bot.on('text', async (ctx) => {
-  const message = ctx.message;
+    if (update.message && update.message.text) {
+      const message = update.message;
+      const url = message.text;
 
-  // Check if the message is a text message (not an animation or other type)
-  if (message && message.text && typeof message.text === 'string') {
-    const url = message.text;
-
-    if (ytdl.validateURL(url)) {
-      try {
-        ctx.reply('Downloading and converting your YouTube video to MP3, please wait...');
-
-        const outputFilePath = path.join(__dirname, 'downloads', `${Date.now()}.mp3`);
-
-        // Download and convert the YouTube audio to MP3
+      // Check if the URL is a valid YouTube URL
+      if (ytdl.validateURL(url)) {
+        const outputFilePath = path.join('/tmp', `${Date.now()}.mp3`); // Use /tmp for Vercel deployment
+        
+        // Download and convert to MP3
         await downloadAndConvertToMP3(url, outputFilePath);
 
-        // Send the converted MP3 file to the user
-        await ctx.replyWithAudio({ source: fs.createReadStream(outputFilePath) });
+        // Send the MP3 file back to the user
+        await bot.telegram.sendAudio(message.chat.id, { source: fs.createReadStream(outputFilePath) });
 
-        // Clean up the file after sending it
+        // Clean up the temporary file after sending it
         fs.unlinkSync(outputFilePath);
-
-      } catch (error) {
-        console.error(error);
-        ctx.reply('Sorry, there was an error processing your request.');
+      } else {
+        await bot.telegram.sendMessage(message.chat.id, 'Please send a valid YouTube URL.');
       }
-    } else {
-      ctx.reply('Please send a valid YouTube URL.');
     }
-  } else {
-    ctx.reply('Please send a valid message with a YouTube URL.');
+
+    res.status(200).send('OK'); // Respond to Telegram with a 200 OK
+  } catch (error) {
+    console.error('Error processing the webhook:', error);
+    res.status(500).send('Internal Server Error');
   }
-});
-
-// Start the bot
-bot.launch();
-
-// Graceful shutdown
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
