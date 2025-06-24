@@ -29,10 +29,14 @@ bot.on('message:text', async (ctx) => {
       // Stream the audio directly from YouTube
       const audioStream = streamAudio(url);
 
-      // Send the audio stream directly to the user as MP3
-      await ctx.replyWithAudio({ media: audioStream });
+      // Send the audio stream directly to the user as MP3 or audio format
+      await ctx.replyWithAudio({
+        media: audioStream,
+        caption: 'Here is your audio from YouTube!'
+      });
 
     } catch (error) {
+      console.error(error);
       await ctx.reply('There was an error processing your request: ' + error.message);
     }
   } else {
