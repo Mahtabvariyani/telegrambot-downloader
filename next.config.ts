@@ -1,7 +1,10 @@
-// next.config.ts
+// File: next.config.mjs // [!code focus]
 
-module.exports = {
-  experimental: {
-    serverExternalPackages: [],  // Update this to the correct key
-  },
-};
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  experimental: { // [!code ++] // [!code focus]
+    serverComponentsExternalPackages: ['grammy'], // [!code ++] // [!code focus]
+  }, // [!code ++] // [!code focus]
+}
+
+export default nextConfig
