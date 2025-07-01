@@ -1,78 +1,86 @@
-const { Bot, webhookCallback } = require('grammy');
-const ytdl = require('ytdl-core');
-const { PassThrough } = require('stream'); // To convert the stream
-const fs = require('fs');
+import TelegramBot from 'node-telegram-bot-api';
+import ytdlp from 'yt-dlp-exec';
+import ffmpegPath from 'ffmpeg-static';
+import ffmpeg from 'fluent-ffmpeg';
+import fs from 'fs';
+import path from 'path';
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
-if (!token) throw new Error('TELEGRAM_BOT_TOKEN environment variable not found.');
 
-const bot = new Bot(token);
+if (!global.botInstance) {
+  global.botInstance = new TelegramBot(token, { polling: true });
+}
 
-// Function to send the main menu with options
-const sendMainMenu = async (ctx) => {
-  const options = {
+const bot = global.botInstance;
+
+const downloadDir = path.resolve('./public/downloads');
+
+if (!fs.existsSync(downloadDir)) {
+  fs.mkdirSync(downloadDir, { recursive: true });
+}
+
+bot.onText(/^(https?:\/\/[^\s]+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const url = match[1];
+
+  bot.sendMessage(chatId, 'Choose format:', {
     reply_markup: {
       inline_keyboard: [
-        [{ text: 'URL to MP3', callback_data: 'mp3' }],
-        [{ text: 'URL to Video', callback_data: 'video' }],
-        [{ text: 'JPEG to PDF', callback_data: 'jpeg_to_pdf' }],
+        [
+          { text: '🎥 Video', callback_data: `video|${url}` },
+          { text: '🎵 MP3', callback_data: `audio|${url}` },
+        ],
       ],
     },
-  };
-  await ctx.reply('Choose an option:', options);
-};
+  });
+});
 
-// Function to stream YouTube audio (without saving the file)
-const streamAudio = (url) => {
-  const audioStream = ytdl(url, { filter: 'audioonly' });
-  const passthrough = new PassThrough();
-  audioStream.pipe(passthrough); // Pipe the audio stream to a pass-through stream
-  return passthrough;
-};
+bot.on('callback_query', async (callbackQuery) => {
+  const chatId = callbackQuery.message.chat.id;
+  const [type, url] = callbackQuery.data.split('|');
 
-bot.on('message', async (ctx) => {
-  if (ctx.message.text === '/start') {
-    await sendMainMenu(ctx); // Show the main menu when the user starts the bot
+  bot.answerCallbackQuery(callbackQuery.id);
+
+  try {
+    const outputFile = `${Date.now()}_${type === 'audio' ? 'audio.mp3' : 'video.mp4'}`;
+    const filePath = path.join(downloadDir, outputFile);
+
+    if (type === 'video') {
+      await ytdlp(url, {
+        output: filePath,
+        format: 'mp4',
+      });
+
+      await bot.sendVideo(chatId, filePath);
+    } else if (type === 'audio') {
+      const tempVideo = filePath.replace('.mp3', '.temp.mp4');
+      await ytdlp(url, {
+        output: tempVideo,
+        format: 'bestaudio',
+      });
+
+      await new Promise((resolve, reject) => {
+        ffmpeg(tempVideo)
+          .noVideo()
+          .audioCodec('libmp3lame')
+          .save(filePath)
+          .on('end', resolve)
+          .on('error', reject);
+      });
+
+      await bot.sendAudio(chatId, filePath);
+      fs.unlinkSync(tempVideo);
+    }
+
+    fs.unlinkSync(filePath); // Delete after sending
+  } catch (error) {
+    console.error(error);
+    bot.sendMessage(chatId, '⚠️ Failed to download or convert the media.');
   }
 });
 
-bot.on('callback_query', async (ctx) => {
-  const data = ctx.callbackQuery.data;
-
-  if (data === 'mp3') {
-    // Prompt the user to send a YouTube URL
-    await ctx.reply('Please send a YouTube URL to convert to MP3.');
-
-    // Collect the YouTube URL from the user
-    bot.once('message:text', async (ctx) => {
-      const youtubeUrl = ctx.message.text; // Get the URL sent by the user
-      try {
-        await ctx.reply('Processing your request...');
-
-        // Stream the audio directly from YouTube
-        const audioStream = streamAudio(youtubeUrl);
-
-        // Send the audio stream directly to the user as MP3
-        await ctx.replyWithAudio({
-          media: audioStream,
-          caption: 'Here is your MP3 file from the YouTube URL.',
-        });
-
-        // After sending the audio, show the main menu again
-        await sendMainMenu(ctx);
-      } catch (error) {
-        await ctx.reply('There was an error processing your request: ' + error.message);
-      }
-    });
-  } else if (data === 'video') {
-    await ctx.reply('Please send a YouTube URL to download the video.');
-    // Handle video download here (similar to MP3 option)
-  } else if (data === 'jpeg_to_pdf') {
-    await ctx.reply('Please send a JPEG file to convert to PDF.');
-    bot.once('message', async (ctx) => {
-      // Handle JPEG to PDF conversion here
-    });
-  }
-});
-
-module.exports.POST = webhookCallback(bot, 'std/http');
+export default function handler(req, res) {
+  res.status(200).send('Telegram bot running');
+}
