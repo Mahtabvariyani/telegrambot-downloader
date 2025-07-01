@@ -1,11 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
-import ytdlp from 'yt-dlp-exec';
-import ffmpegPath from 'ffmpeg-static';
-import ffmpeg from 'fluent-ffmpeg';
+import ytdl from 'ytdl-core';
 import fs from 'fs';
 import path from 'path';
-
-ffmpeg.setFfmpegPath(ffmpegPath);
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -16,7 +12,6 @@ if (!global.botInstance) {
 const bot = global.botInstance;
 
 const downloadDir = path.resolve('./public/downloads');
-
 if (!fs.existsSync(downloadDir)) {
   fs.mkdirSync(downloadDir, { recursive: true });
 }
@@ -25,13 +20,15 @@ bot.onText(/^(https?:\/\/[^\s]+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const url = match[1];
 
+  if (!ytdl.validateURL(url)) {
+    return bot.sendMessage(chatId, '❌ This link is not a valid YouTube URL.');
+  }
+
   bot.sendMessage(chatId, 'Choose format:', {
     reply_markup: {
       inline_keyboard: [
-        [
-          { text: '🎥 Video', callback_data: `video|${url}` },
-          { text: '🎵 MP3', callback_data: `audio|${url}` },
-        ],
+        [{ text: '🎥 Video', callback_data: `video|${url}` }],
+        [{ text: '❌ Cancel', callback_data: `cancel` }],
       ],
     },
   });
@@ -39,48 +36,39 @@ bot.onText(/^(https?:\/\/[^\s]+)/, async (msg, match) => {
 
 bot.on('callback_query', async (callbackQuery) => {
   const chatId = callbackQuery.message.chat.id;
-  const [type, url] = callbackQuery.data.split('|');
+  const data = callbackQuery.data;
 
-  bot.answerCallbackQuery(callbackQuery.id);
+  if (data === 'cancel') {
+    bot.answerCallbackQuery(callbackQuery.id, { text: 'Cancelled.' });
+    return;
+  }
+
+  const [type, url] = data.split('|');
+  const id = Date.now();
+  const filePath = path.join(downloadDir, `${id}.mp4`);
+
+  bot.answerCallbackQuery(callbackQuery.id, { text: 'Downloading...' });
 
   try {
-    const outputFile = `${Date.now()}_${type === 'audio' ? 'audio.mp3' : 'video.mp4'}`;
-    const filePath = path.join(downloadDir, outputFile);
+    const stream = ytdl(url, { quality: '18' }); // 18 = mp4 360p
+    const writeStream = fs.createWriteStream(filePath);
 
-    if (type === 'video') {
-      await ytdlp(url, {
-        output: filePath,
-        format: 'mp4',
-      });
+    stream.pipe(writeStream);
 
+    writeStream.on('finish', async () => {
       await bot.sendVideo(chatId, filePath);
-    } else if (type === 'audio') {
-      const tempVideo = filePath.replace('.mp3', '.temp.mp4');
-      await ytdlp(url, {
-        output: tempVideo,
-        format: 'bestaudio',
-      });
+      fs.unlinkSync(filePath);
+    });
 
-      await new Promise((resolve, reject) => {
-        ffmpeg(tempVideo)
-          .noVideo()
-          .audioCodec('libmp3lame')
-          .save(filePath)
-          .on('end', resolve)
-          .on('error', reject);
-      });
-
-      await bot.sendAudio(chatId, filePath);
-      fs.unlinkSync(tempVideo);
-    }
-
-    fs.unlinkSync(filePath); // Delete after sending
-  } catch (error) {
-    console.error(error);
-    bot.sendMessage(chatId, '⚠️ Failed to download or convert the media.');
+    stream.on('error', () => {
+      bot.sendMessage(chatId, '❌ Failed to download video.');
+    });
+  } catch (err) {
+    console.error(err);
+    bot.sendMessage(chatId, '❌ Error downloading the video.');
   }
 });
 
 export default function handler(req, res) {
-  res.status(200).send('Telegram bot running');
+  res.status(200).send('Telegram bot (YouTube only) is running.');
 }
